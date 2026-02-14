@@ -6,10 +6,14 @@ import schedule
 import json
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from openai import OpenAI
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+OPENAI_KEY = os.getenv("OPENAI_KEY")
+
+client_ai = OpenAI(api_key=OPENAI_KEY)
 
 CHANNELS = {
     "dagens": int(os.getenv("CHANNEL_DAGENS")),
@@ -63,8 +67,7 @@ KEYWORDS = {
         "skjutning",
         "gäng",
         "sprängning",
-        "kriminell",
-        "gängkriminalitet"
+        "kriminell"
     ],
 
     "ekonomi": [
@@ -72,8 +75,7 @@ KEYWORDS = {
         "inflation",
         "bank",
         "budget",
-        "ekonomi",
-        "riksbank"
+        "ekonomi"
     ],
 
     "eu": [
@@ -92,7 +94,6 @@ CATEGORY_NAMES = {
 }
 
 
-# load links
 def load_links():
 
     if not os.path.exists(SAVE_FILE):
@@ -102,14 +103,12 @@ def load_links():
         return json.load(f)
 
 
-# save links
 def save_links(data):
 
     with open(SAVE_FILE, "w") as f:
         json.dump(data, f)
 
 
-# clean old links
 def clean_old_links(data):
 
     cutoff = datetime.now() - timedelta(days=MAX_AGE_DAYS)
@@ -133,22 +132,6 @@ posted_links = clean_old_links(posted_links)
 save_links(posted_links)
 
 
-def get_summary(entry):
-
-    if hasattr(entry, "summary"):
-        text = entry.summary
-
-    elif hasattr(entry, "description"):
-        text = entry.description
-
-    else:
-        return "Klicka för att läsa mer."
-
-    text = text.replace("<p>", "").replace("</p>", "")
-
-    return text[:200] + "..."
-
-
 def get_text(entry):
 
     title = entry.title if hasattr(entry, "title") else ""
@@ -164,12 +147,41 @@ def get_text(entry):
     return title + " " + summary
 
 
+async def summarize(text):
+
+    try:
+
+        response = client_ai.chat.completions.create(
+
+            model="gpt-4o-mini",
+
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Du sammanfattar nyheter kort och neutralt på svenska."
+                },
+                {
+                    "role": "user",
+                    "content": f"Sammanfatta denna nyhet i max 2 meningar:\n{text}"
+                }
+            ]
+
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+
+        print("AI error:", e)
+
+        return "Kunde inte skapa AI-sammanfattning."
+
+
 async def post_category(category):
 
     channel = client.get_channel(CHANNELS[category])
 
     if not channel:
-        print(f"Kunde inte hitta kanal: {category}")
         return
 
     limit = LIMITS[category]
@@ -199,10 +211,12 @@ async def post_category(category):
                 if not any(word in text.lower() for word in KEYWORDS[category]):
                     continue
 
+            summary = await summarize(text)
+
             embed = discord.Embed(
 
                 title=entry.title,
-                description=get_summary(entry),
+                description=summary,
                 url=entry.link,
                 color=0x005BBB
 
@@ -220,7 +234,6 @@ async def post_category(category):
 
             new_posts += 1
 
-    # om inga nyheter
     if new_posts == 0:
 
         await channel.send("Inga nya nyheter.")
