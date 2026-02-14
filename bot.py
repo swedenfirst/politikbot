@@ -16,66 +16,82 @@ OPENAI_KEY = os.getenv("OPENAI_KEY")
 client_ai = OpenAI(api_key=OPENAI_KEY)
 
 CHANNELS = {
-    "dagens": int(os.getenv("CHANNEL_DAGENS")),
+    "regeringen": int(os.getenv("CHANNEL_REGERINGEN")),
     "riksdagen": int(os.getenv("CHANNEL_RIKSDAGEN")),
-    "eu": int(os.getenv("CHANNEL_EU")),
+    "partier": int(os.getenv("CHANNEL_PARTIER")),
+    "kriminalitet": int(os.getenv("CHANNEL_KRIMINALITET")),
     "ekonomi": int(os.getenv("CHANNEL_EKONOMI")),
-    "gang": int(os.getenv("CHANNEL_GANG")),
+    "globalt": int(os.getenv("CHANNEL_GLOBALT")),
+    "eu": int(os.getenv("CHANNEL_EU")),
 }
 
-client = discord.Client(intents=discord.Intents.default())
-
-SAVE_FILE = "posted_links.json"
-
-MAX_AGE_DAYS = 30
+CATEGORY_NAMES = {
+    "regeringen": "🏛 REGERINGEN",
+    "riksdagen": "📜 RIKSDAGEN",
+    "partier": "🗳 PARTIER & POLITIKER",
+    "kriminalitet": "🚨 KRIMINALITET",
+    "ekonomi": "💰 EKONOMI",
+    "globalt": "🌍 GLOBAL POLITIK",
+    "eu": "🇪🇺 EU",
+}
 
 LIMITS = {
-    "dagens": 3,
+    "regeringen": None,
+    "riksdagen": None,
+    "partier": 3,
+    "kriminalitet": 3,
     "ekonomi": 3,
+    "globalt": 3,
     "eu": 3,
-    "gang": 3,
-    "riksdagen": None
 }
 
 FEEDS = {
 
-    "dagens": [
-        "https://www.svt.se/nyheter/inrikes/rss.xml"
+    "regeringen": [
+        "https://www.regeringen.se/pressmeddelanden/rss.xml"
     ],
 
     "riksdagen": [
-        "https://www.riksdagen.se/sv/aktuellt/rss/aktuellt-fran-riksdagen/",
-        "https://www.riksdagen.se/sv/press/rss/pressmeddelanden/"
+        "https://www.riksdagen.se/sv/aktuellt/rss/aktuellt-fran-riksdagen/"
+    ],
+
+    "partier": [
+        "https://www.svt.se/nyheter/inrikes/rss.xml"
+    ],
+
+    "kriminalitet": [
+        "https://www.svt.se/nyheter/inrikes/rss.xml"
     ],
 
     "ekonomi": [
         "https://www.svt.se/nyheter/ekonomi/rss.xml"
     ],
 
-    "eu": [
+    "globalt": [
         "https://www.svt.se/nyheter/utrikes/rss.xml"
     ],
 
-    "gang": [
-        "https://www.svt.se/nyheter/inrikes/rss.xml"
+    "eu": [
+        "https://www.svt.se/nyheter/utrikes/rss.xml"
     ]
 }
 
 KEYWORDS = {
 
-    "gang": [
+    "kriminalitet": [
         "skjutning",
-        "gäng",
         "sprängning",
-        "kriminell"
+        "gäng",
+        "mord"
     ],
 
-    "ekonomi": [
-        "ränta",
-        "inflation",
-        "bank",
-        "budget",
-        "ekonomi"
+    "partier": [
+        "regeringen",
+        "riksdagen",
+        "moderaterna",
+        "socialdemokraterna",
+        "sd",
+        "vänsterpartiet"
     ],
 
     "eu": [
@@ -85,13 +101,11 @@ KEYWORDS = {
     ]
 }
 
-CATEGORY_NAMES = {
-    "dagens": "📰 DAGENS NYHETER",
-    "riksdagen": "🏛 RIKSDAGEN",
-    "ekonomi": "💰 EKONOMI",
-    "eu": "🇪🇺 EU-POLITIK",
-    "gang": "🚨 GÄNGKRIMINALITET"
-}
+SAVE_FILE = "posted_links.json"
+
+MAX_AGE_DAYS = 30
+
+client = discord.Client(intents=discord.Intents.default())
 
 
 def load_links():
@@ -109,25 +123,23 @@ def save_links(data):
         json.dump(data, f)
 
 
-def clean_old_links(data):
+def clean_links(data):
 
     cutoff = datetime.now() - timedelta(days=MAX_AGE_DAYS)
 
-    new_data = {}
+    new = {}
 
     for link, timestamp in data.items():
 
-        post_time = datetime.fromisoformat(timestamp)
+        if datetime.fromisoformat(timestamp) > cutoff:
+            new[link] = timestamp
 
-        if post_time > cutoff:
-            new_data[link] = timestamp
-
-    return new_data
+    return new
 
 
 posted_links = load_links()
 
-posted_links = clean_old_links(posted_links)
+posted_links = clean_links(posted_links)
 
 save_links(posted_links)
 
@@ -158,11 +170,11 @@ async def summarize(text):
             messages=[
                 {
                     "role": "system",
-                    "content": "Du sammanfattar nyheter kort och neutralt på svenska."
+                    "content": "Sammanfatta nyheten kort, sakligt och neutralt på svenska i max 2 meningar."
                 },
                 {
                     "role": "user",
-                    "content": f"Sammanfatta denna nyhet i max 2 meningar:\n{text}"
+                    "content": text
                 }
             ]
 
@@ -174,7 +186,7 @@ async def summarize(text):
 
         print("AI error:", e)
 
-        return "Kunde inte skapa AI-sammanfattning."
+        return "Kunde inte skapa sammanfattning."
 
 
 async def post_category(category):
@@ -184,13 +196,13 @@ async def post_category(category):
     if not channel:
         return
 
+    await channel.send(
+        f"\n{CATEGORY_NAMES[category]} – {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    )
+
     limit = LIMITS[category]
 
-    new_posts = 0
-
-    await channel.send(
-        f"\n🇸🇪 **{CATEGORY_NAMES[category]} – {datetime.now().strftime('%Y-%m-%d %H:%M')}**\n"
-    )
+    count = 0
 
     for feed_url in FEEDS[category]:
 
@@ -198,7 +210,7 @@ async def post_category(category):
 
         for entry in feed.entries:
 
-            if limit is not None and new_posts >= limit:
+            if limit and count >= limit:
                 break
 
             if entry.link in posted_links:
@@ -208,7 +220,7 @@ async def post_category(category):
 
             if category in KEYWORDS:
 
-                if not any(word in text.lower() for word in KEYWORDS[category]):
+                if not any(k in text.lower() for k in KEYWORDS[category]):
                     continue
 
             summary = await summarize(text)
@@ -222,34 +234,29 @@ async def post_category(category):
 
             )
 
-            embed.set_footer(
-                text=CATEGORY_NAMES[category]
-            )
-
             await channel.send(embed=embed)
 
             posted_links[entry.link] = datetime.now().isoformat()
 
             save_links(posted_links)
 
-            new_posts += 1
+            count += 1
 
-    if new_posts == 0:
+    if count == 0:
 
         await channel.send("Inga nya nyheter.")
-
-    print(f"{category}: {new_posts} nya nyheter")
 
 
 async def post_all():
 
-    print("Kollar efter nya nyheter...")
+    print("Kollar nyheter...")
 
     for category in CHANNELS:
+
         await post_category(category)
 
 
-async def scheduler_loop():
+async def scheduler():
 
     while True:
 
@@ -261,15 +268,15 @@ async def scheduler_loop():
 @client.event
 async def on_ready():
 
-    print(f"Inloggad som {client.user}")
+    print("Bot online:", client.user)
 
     await post_all()
 
-    schedule.every(1).hours.do(
+    schedule.every(15).minutes.do(
         lambda: asyncio.create_task(post_all())
     )
 
-    asyncio.create_task(scheduler_loop())
+    asyncio.create_task(scheduler())
 
 
 client.run(DISCORD_TOKEN)
