@@ -1,4 +1,5 @@
 discord.py
 feedparser
 python-dotenv
-schedule
+Schedule
+openai
